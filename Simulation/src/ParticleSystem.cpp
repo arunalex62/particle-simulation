@@ -8,25 +8,30 @@
 
 ParticleSystem::ParticleSystem()
 {
-	m_ParticlePool.resize(1000);
+	m_ParticlePool.resize(100);
+	gravity = -0.6f;
+	for (int i = 0; i < 100; ++i) {
+		m_ParticlePool[i].Position = { i / 100.0f, i / 100.0f };
+		m_ParticlePool[i].Velocity = { 0.0f, 0.0f }; 
+		m_ParticlePool[i].Forces = { 0.0f, 0.0f }; 
+		m_ParticlePool[i].Colour = { 13 / 255.0f, 38 / 255.0f, 212 / 255.0f, 1.0f };
+	}
 }
 
 void ParticleSystem::OnUpdate(GLCore::Timestep ts)
 {
 	for (auto& particle : m_ParticlePool)
 	{
-		if (!particle.Active)
-			continue;
-
-		if (particle.LifeRemaining <= 0.0f)
+		particle.Forces.y += gravity;
+		if (particle.Position.y < 0.0f)
 		{
-			particle.Active = false;
-			continue;
+			particle.Position.y = 0.0f;
+			particle.Velocity.y *= -0.5f;
+			//particle.Forces.y += -0.5 * particle.Velocity.y;
 		}
-
-		particle.LifeRemaining -= ts;
+		particle.Velocity += particle.Forces * (float)ts;
 		particle.Position += particle.Velocity * (float)ts;
-		particle.Rotation += 0.01f * ts;
+		particle.Forces = { 0.0f, 0.0f };
 	}
 }
 
@@ -35,10 +40,10 @@ void ParticleSystem::OnRender(GLCore::Utils::OrthographicCamera& camera)
 	if (!m_QuadVA)
 	{
 		float vertices[] = {
-			 -0.5f, -0.5f, 0.0f,
-			  0.5f, -0.5f, 0.0f,
-			  0.5f,  0.5f, 0.0f,
-			 -0.5f,  0.5f, 0.0f
+			 -0.1f, -0.1f, 0.0f,
+			  0.1f, -0.1f, 0.0f,
+			  0.1f,  0.1f, 0.0f,
+			 -0.1f,  0.1f, 0.0f
 		};
 
 		glCreateVertexArrays(1, &m_QuadVA);
@@ -69,49 +74,23 @@ void ParticleSystem::OnRender(GLCore::Utils::OrthographicCamera& camera)
 	glUseProgram(m_ParticleShader->GetRendererID());
 	glUniformMatrix4fv(m_ParticleShaderViewProj, 1, GL_FALSE, glm::value_ptr(camera.GetViewProjectionMatrix()));
 
+	// Draw the horizontal bar at y = 0
+	auto width = GLCore::Application::Get().GetWindow().GetWidth();
+	glm::mat4 barTransform = glm::translate(glm::mat4(1.0f), { 0.0f, 0.0f, 0.0f })  // Position at y = 0
+		* glm::scale(glm::mat4(1.0f), { width, 0.1f, 1.0f });  // Scale to make it wide and flat
+	glUniformMatrix4fv(m_ParticleShaderTransform, 1, GL_FALSE, glm::value_ptr(barTransform));
+	glUniform4f(m_ParticleShaderColor, 0.3f, 0.3f, 0.3f, 1.0f);  // Set color to grey
+	glBindVertexArray(m_QuadVA);
+	glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, nullptr);
+
 	for (auto& particle : m_ParticlePool)
-	{
-		if (!particle.Active)
-			continue;
-
-		// Fade away particles
-		float life = particle.LifeRemaining / particle.LifeTime;
-		glm::vec4 color = glm::lerp(particle.ColorEnd, particle.ColorBegin, life);
-		//color.a = color.a * life;
-
-		float size = glm::lerp(particle.SizeEnd, particle.SizeBegin, life);
-		
+	{	
 		// Render
 		glm::mat4 transform = glm::translate(glm::mat4(1.0f), { particle.Position.x, particle.Position.y, 0.0f })
-			* glm::rotate(glm::mat4(1.0f), particle.Rotation, { 0.0f, 0.0f, 1.0f })
-			* glm::scale(glm::mat4(1.0f), { size, size, 1.0f });
+			* glm::scale(glm::mat4(1.0f), { 0.1f, 0.1f, 1.0f });
 		glUniformMatrix4fv(m_ParticleShaderTransform, 1, GL_FALSE, glm::value_ptr(transform));
-		glUniform4fv(m_ParticleShaderColor, 1, glm::value_ptr(color));
+		glUniform4fv(m_ParticleShaderColor, 1, glm::value_ptr(particle.Colour));
 		glBindVertexArray(m_QuadVA);
 		glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, nullptr);
 	}
-}
-
-void ParticleSystem::Emit(const ParticleProps& particleProps)
-{
-	Particle& particle = m_ParticlePool[m_PoolIndex];
-	particle.Active = true;
-	particle.Position = particleProps.Position;
-	particle.Rotation = Random::Float() * 2.0f * glm::pi<float>();
-
-	// Velocity
-	particle.Velocity = particleProps.Velocity;
-	particle.Velocity.x += particleProps.VelocityVariation.x * (Random::Float() - 0.5f);
-	particle.Velocity.y += particleProps.VelocityVariation.y * (Random::Float() - 0.5f);
-
-	// Color
-	particle.ColorBegin = particleProps.ColorBegin;
-	particle.ColorEnd = particleProps.ColorEnd;
-
-	particle.LifeTime = particleProps.LifeTime;
-	particle.LifeRemaining = particleProps.LifeTime;
-	particle.SizeBegin = particleProps.SizeBegin + particleProps.SizeVariation * (Random::Float() - 0.5f);
-	particle.SizeEnd = particleProps.SizeEnd;
-
-	m_PoolIndex = --m_PoolIndex % m_ParticlePool.size();
 }
