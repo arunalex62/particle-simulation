@@ -18,6 +18,6 @@ public:
 	virtual void OnImGuiRender() override;
 private:
 	GLCore::Utils::OrthographicCameraController m_CameraController;
-	ParticleProps m_Particle;
+	Particle m_Particle;
 	ParticleSystem m_ParticleSystem;
 };
