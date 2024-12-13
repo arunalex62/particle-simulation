@@ -60,6 +60,9 @@ void SandboxLayer::OnImGuiRender()
 	// ImGui here
 
 	ImGui::Begin("Settings");
-	ImGui::ColorEdit4("Colour", glm::value_ptr(m_Particle.Colour));
+	ImGui::Text(m_ParticleSystem.frames_per_second.c_str());
+	ImGui::DragFloat("Gravity", &m_ParticleSystem.gravity, -0.100f, -10.000f, 0.000f);
+	ImGui::DragFloat("Vorticity", &m_ParticleSystem.vorticityEpsilon, 0.001f, 0.00f, 0.050f);
+	ImGui::DragFloat("Bouyancy", &m_ParticleSystem.buoyancyEpsilon, 0.02f, 0.00f, 0.050f);
 	ImGui::End();
 }
