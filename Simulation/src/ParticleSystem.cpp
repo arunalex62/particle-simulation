@@ -10,6 +10,9 @@ ParticleSystem::ParticleSystem()
 {
 	m_ParticlePool.resize(10000);
 	gravity = -0.1f;
+	vorticityEpsilon = 0.001f;
+	buoyancyEpsilon = 0.02f;
+	frames_per_second = "FPS: 0";
 	for (int i = 0; i < m_ParticlePool.size(); ++i) {
 		m_ParticlePool[i].Position = { Random::Float(), Random::Float() };
 		m_ParticlePool[i].Velocity = { (Random::Float() - 0.5f) / 10.0f, (Random::Float() - 0.5f) / 10.0f };
@@ -22,14 +25,25 @@ ParticleSystem::ParticleSystem()
 	// Set the velocity field to random values
 	for (int y = 0; y < 100; ++y) {
 		for (int x = 0; x < 50; ++x) {
-			m_VelocityField[y][x] = { Random::Float() / 2000.0f, 0.0f };
+			m_VelocityField[y][x] = { 0.0000f, 0.0001f };
+			// Set bottom boundary to 0 velocity
+			m_VelocityField[0][x] = { 0.0f, 0.0f };
+			m_VelocityField[99][x] = m_VelocityField[98][x];
+			// Ensure no vertical velocity at the top;
+			m_VelocityField[99][x].y = 0.0f;
 		}
 	}
 	for (int y = 0; y < 100; ++y) {
 		for (int x = 50; x < 100; ++x) {
-			m_VelocityField[y][x] = { (Random::Float() - 1.0f) / 2000.0f, 0.0f };
+			m_VelocityField[y][x] = { 0.0000f, 0.0001f };
+			// Set bottom boundary to 0 velocity
+			m_VelocityField[0][x] = { 0.0f, 0.0f };
+			m_VelocityField[99][x] = m_VelocityField[98][x];
+			// Ensure no vertical velocity at the top.
+			m_VelocityField[99][x].y = 0.0f;
 		}
 	}
+
 	// Initializes Temperature field to be cooler at the top and warmer at the bottom. 
 	// This is to simulate the atmosphere. 
 	// 300K at the bottom and 250K at the top.
@@ -42,7 +56,10 @@ ParticleSystem::ParticleSystem()
 	for (int y = 0; y < 100; ++y) {
 		for (int x = 0; x < 100; ++x) {
 			m_TemperatureField[y][x] = {300.0f - 50.0f * ((float)y)/100.0f};
+			m_TemperatureField[99][x] = 300.0f;
+			m_TemperatureField[0][x] = 300.0f + Random::Float() * 5.0f;
 			m_VaporField[y][x] = { 0.02f + (0.001f - 0.02f) * ((float)y) / 100.0f };
+			m_VaporField[99][x] = { 0.0f };
 			m_CloudWaterField[y][x] = 0.0f;
 		}
 	}
@@ -50,7 +67,7 @@ ParticleSystem::ParticleSystem()
 	// Initializes the pressure field to be decreasing from the bottom to the top.
 	for (int y = 0; y < 100; ++y) {
 		for (int x = 0; x < 100; ++x) {
-			m_PressureField[y][x] = {100000.0f * std::pow((1.0f - (static_cast<float>(y)/100.0f * 15.0f * 10.0f )/m_TemperatureField[y][x]), 9.8f/(10.0f * 287.0f)) };
+			m_PressureField[y][x] = {100000.0f * std::pow((1.0f - (static_cast<float>(y)/100.0f * 15.0f * 10.0f )/m_TemperatureField[y][x]), (- 1.0f * gravity) / (10.0f * 287.0f))};
 		}
 	}
 }
@@ -85,32 +102,46 @@ float ParticleSystem::CalculateBuoyancyForce(const int x, const int y) {
 	const float theta_v0 = 295.0f; 
 	float theta_v = m_TemperatureField[y][x] * (1.0f + 0.61f * m_VaporField[y][x]);
 
-	float buoyancy = -0.01f * gravity * ((theta_v / theta_v0) - m_CloudWaterField[y][x]);
+	float buoyancy = -1.0f * buoyancyEpsilon * gravity * ((theta_v / theta_v0) - m_CloudWaterField[y][x]);
 
 	return buoyancy;
 }
 
+// Implemented from 2001 paper.
 std::array<std::array<float, 100>, 100> ParticleSystem::CalculateVorticity(const std::array<std::array<glm::vec2, 100>, 100>& velocityField) {
 	std::array<std::array<float, 100>, 100> vorticityField;
+	vorticityField.fill({ 0 });
 	for (int y = 1; y < 99; ++y) {
 		for (int x = 1; x < 99; ++x) {
-			float dvdx = (velocityField[y][x + 1].y - velocityField[y][x - 1].y) / (0.02f);
-			float dudy = (velocityField[y + 1][x].x - velocityField[y - 1][x].x) / (0.02f);
-			vorticityField[y][x] = dvdx - dudy;
+			vorticityField[y][x] = (velocityField[y][x + 1].x - velocityField[y][x - 1].x) / 0.02f - (velocityField[y + 1][x].y - velocityField[y - 1][x].y) / 0.02f;
 		}
+	}
+	for (int y = 0; y < 100; ++y) {
+		vorticityField[y][0] = vorticityField[y][1];
+		vorticityField[y][99] = vorticityField[y][98];
+	}
+	for (int x = 0; x < 100; ++x) {
+		vorticityField[0][x] = vorticityField[1][x];
+		vorticityField[99][x] = vorticityField[98][x];
 	}
 	return vorticityField;
 }
 
-std::array<std::array<glm::vec2, 100>, 100> ParticleSystem::ComputeVorticityGradient(
+std::array<std::array<glm::vec2, 100>, 100> ParticleSystem::ComputeNormalizedVorticityGradient(
 	const std::array<std::array<float, 100>, 100>& vorticityField) {
 	std::array<std::array<glm::vec2, 100>, 100> vorticityGradient;
 	for (int y = 1; y < 99; ++y) {
 		for (int x = 1; x < 99; ++x) {
-			float dwdx = (vorticityField[y][x + 1] - vorticityField[y][x - 1]) / (0.02f);
-			float dwdy = (vorticityField[y + 1][x] - vorticityField[y - 1][x]) / (0.02f);
-
-			vorticityGradient[y][x] = glm::vec2(dwdx, dwdy);
+			float nx = (std::abs(vorticityField[y][x + 1]) - std::abs(vorticityField[y][x])) / 0.01f;
+			float ny = (std::abs(vorticityField[y+1][x]) - std::abs(vorticityField[y][x])) / 0.01f;
+			glm::vec2 n = { nx, ny };
+			float magnitude = glm::length(n);
+			if (magnitude > 0.000001) {
+				vorticityGradient[y][x] = n / magnitude;
+			}
+			else {
+				vorticityGradient[y][x] = { 0.0f, 0.0f };
+			}
 		}
 	}
 	return vorticityGradient;
@@ -119,20 +150,18 @@ std::array<std::array<glm::vec2, 100>, 100> ParticleSystem::ComputeVorticityGrad
 void ParticleSystem::ApplyVorticityConfinement(
 	std::array<std::array<glm::vec2, 100>, 100>& velocityField,
 	const std::array<std::array<float, 100>, 100>& vorticityField,
-	const std::array<std::array<glm::vec2, 100>, 100>& vorticityGradient,
-	float epsilon, float deltaTime) {
+	const std::array<std::array<glm::vec2, 100>, 100>& vorticityGradient, float deltaTime) {
 	for (int y = 1; y < 99; ++y) {
 		for (int x = 1; x < 99; ++x) {
-			glm::vec2 vorticity = vorticityGradient[y][x];
-			float vorticityMagnitude = glm::length(vorticity);
-			glm::vec2 N = (vorticityMagnitude > 0.0f) ? vorticity / vorticityMagnitude : glm::vec2(0.0f);
-			glm::vec2 force = epsilon * 0.01f * glm::vec2(-N.y, N.x) * vorticityField[y][x];
-			velocityField[y][x] += force * deltaTime;
+			float forceX = -vorticityEpsilon * vorticityGradient[y][x].y * vorticityField[y][x];
+			float forceY = vorticityEpsilon * vorticityGradient[y][x].x * vorticityField[y][x];
+			glm::vec2 force = { forceX, forceY };
+			velocityField[y][x] += force * (float)deltaTime;
 		}
 	}
 }
 
-void ParticleSystem::UpdateWaterVaporField(const std::array<std::array<float, 100>, 100>& temperatureField, 
+void ParticleSystem::UpdateWaterVaporField(std::array<std::array<float, 100>, 100>& temperatureField, 
 	const std::array<std::array<float, 100>, 100>& pressureField, std::array<std::array<float, 100>, 100> vaporField,
 	std::array<std::array<float, 100>, 100> cloudWaterField) {
 	for (int y = 0; y < 100; ++y) {
@@ -142,7 +171,75 @@ void ParticleSystem::UpdateWaterVaporField(const std::array<std::array<float, 10
 			float delta_qv = std::min(q_vs - vaporField[y][x], cloudWaterField[y][x]);
 			vaporField[y][x] = vaporField[y][x] + delta_qv; 
 			cloudWaterField[y][x] = cloudWaterField[y][x] - delta_qv;
+			// θ = θ' + L/(cp * exner) * -1.0f * delta_qv
+			temperatureField[y][x] += 2501000.0f / (1005.0f * 1.0f / std::pow((100000.0f / pressureField[y][x]), 0.286f)) * -1.0f * delta_qv;
 		}
+	}
+}
+// Compute divergence using 2001 method.
+std::array<std::array<float, 100>, 100> ParticleSystem::ComputeDivergence(const std::array<std::array<glm::vec2, 100>, 100>& velocityField) {
+	std::array<std::array<float, 100>, 100> divergenceField = {};
+	for (int y = 1; y < 99; ++y) {
+		for (int x = 1; x < 99; ++x) {
+			divergenceField[y][x] = ((velocityField[y][x + 1].x + velocityField[y][x].x)/2.0f - 
+				(velocityField[y][x - 1].x + velocityField[y][x].x) / 2.0f + 
+				(velocityField[y + 1][x].y + velocityField[y][x].y) / 2.0f - 
+				(velocityField[y - 1][x].y + velocityField[y][x].y) / 2.0f)/0.01f;
+		}
+	}
+	return divergenceField;
+}
+
+void ParticleSystem::SetBoundaryConditions() {
+	// Velocity
+	for (int x = 0; x < 100; ++x) {
+		// Bottom (no-slip)
+		m_VelocityField[0][x] = glm::vec2(0.0f, 0.0f);
+		// Top (free-slip)
+		m_VelocityField[99][x] = m_VelocityField[98][x];
+		m_VelocityField[99][x].y = 0.0f;
+	}
+	for (int y = 0; y < 100; ++y) {
+		m_VelocityField[y][0].y = 0.0f;
+		m_VelocityField[y][99].y = 0.0f; 
+	}
+
+	float ambientTemperature = 250.0f;
+	for (int x = 0; x < 100; ++x) {
+		// Set ambient temperature at the top.
+		m_TemperatureField[99][x] = ambientTemperature;
+	}
+	for (int y = 0; y < 100; ++y) {
+		// Set ambiernt temperature at the sides.
+		m_TemperatureField[y][0] = ambientTemperature;
+		m_TemperatureField[y][99] = ambientTemperature;
+	}
+	for (int x = 0; x < 100; ++x) {
+		// Randomly perturb the temperature at the bottom.
+		m_TemperatureField[0][x] = 300.0f + Random::Float() * 5.0f - 2.5f;
+	}
+
+	// Vapor
+	for (int x = 0; x < 100; ++x) {
+		// Set top qv boundary to 0.0f.
+		m_VaporField[99][x] = 0.0f;
+	}
+	for (int y = 0; y < 100; ++y) {
+		m_VaporField[y][0] = m_VaporField[y][99];
+	}
+	for (int x = 0; x < 100; ++x) {
+		// Randomly perturb the water vapor at the bottom.
+		m_VaporField[0][x] = 0.02f + Random::Float() * 0.005f - 0.0025f;
+	}
+
+	// Set all qc boundaries to 0.0f.
+	for (int x = 0; x < 100; ++x) {
+		m_CloudWaterField[99][x] = 0.0f;
+		m_CloudWaterField[0][x] = 0.0f;
+	}
+	for (int y = 0; y < 100; ++y) {
+		m_CloudWaterField[y][0] = 0.0f;
+		m_CloudWaterField[y][99] = 0.0f;
 	}
 }
 
@@ -163,10 +260,22 @@ void ParticleSystem::AdvectVelocityField(
 			// If position = (0.5, 0.5) and velocity = (0.1, 0.0), old position = (0.4, 0.5), etc.
 			glm::vec2 previousPosition = currentPosition - velocity * timeStep;
 
-
 			// Gets the velocity at that previous position by sampling old velocity field.
-			int previousX = (int)glm::clamp(previousPosition.x * 100.0f, 0.0f, 99.0f);
-			int previousY = (int)glm::clamp(previousPosition.y * 100.0f, 0.0f, 99.0f);
+			int previousX = static_cast<int>(previousPosition.x * 100.0f);
+			int previousY = static_cast<int>(previousPosition.y * 100.0f);
+
+			if (previousX < 0) {
+				previousX = 0;
+			}
+			else if (previousX > 99) {
+				previousX = 99;
+			}
+			if (previousY < 0) {
+				previousY = 0;
+			}
+			else if (previousY > 99) {
+				previousY = 99;
+			}
 			newVelocity[y][x] = oldVelocity[previousY][previousX];
 		}
 	}
@@ -200,6 +309,7 @@ void ParticleSystem::AdvectScalarField(const std::array<std::array<float, 100>, 
 
 void ParticleSystem::OnUpdate(GLCore::Timestep ts)
 {
+	frames_per_second = "FPS: " + std::to_string(int(1.0f / ts.GetSeconds()));
 	// 1. Advect velocity field (u') 
 	{
 		std::array<std::array<glm::vec2, 100>, 100> newVelocityField = m_VelocityField;
@@ -225,9 +335,9 @@ void ParticleSystem::OnUpdate(GLCore::Timestep ts)
 	{
 		auto vorticityField = CalculateVorticity(m_VelocityField);
 
-		auto vorticityGradient = ComputeVorticityGradient(vorticityField);
+		auto vorticityGradient = ComputeNormalizedVorticityGradient(vorticityField);
 
-		ApplyVorticityConfinement(m_VelocityField, vorticityField, vorticityGradient, 0.01f, (float)ts);
+		ApplyVorticityConfinement(m_VelocityField, vorticityField, vorticityGradient, (float)ts);
 	}
 
 	// Calculate and apply buoyancy force
@@ -241,25 +351,39 @@ void ParticleSystem::OnUpdate(GLCore::Timestep ts)
 	}
 
 	// Update Qv and Qc (water vapor and cloud water) fields 
+	// Also updates the temperature field based on the change in water vapor field.
 	{
 		UpdateWaterVaporField(m_TemperatureField, m_PressureField, m_VaporField, m_CloudWaterField);
 	}
-	// Update particles based on velocity field.
+
+	// Calculate divergence of velocity field
+	{
+		//std::array<std::array<float, 100>, 100> divergenceField = ComputeDivergence(m_VelocityField);
+	}
+
+	// Set boundary conditions for fields described in the paper.
+	{
+		SetBoundaryConditions();
+	}
+	// Update particles based on calculated velocity field.
 	for (int i = 0; i < m_ParticlePool.size(); ++i)
 	{
+		// Approximate the position of the particle at the previous timestep.
 		glm::vec2 prevPos = m_ParticlePool[i].Position - m_ParticlePool[i].Velocity * (float)ts;
+		// Convert that position to coordinates on the 100x100 velocity field grid.
 		prevPos *= 100.0f;
 		prevPos = glm::clamp(prevPos, 0.0f, 99.0f);
+		// Get the velocity at the previous point.
 		glm::vec2 sampledVelocityAtGrid = m_VelocityField[(int)(prevPos.y)][(int)(prevPos.x)];
 
 
 		m_ParticlePool[i].Forces.y += gravity;
 
-
 		CheckCollisions(i);
 
 		m_ParticlePool[i].Velocity += m_ParticlePool[i].Forces * (float)ts  +sampledVelocityAtGrid;
 		m_ParticlePool[i].Position += m_ParticlePool[i].Velocity * (float)ts;
+		// Colour of particle based on height.
 		m_ParticlePool[i].Colour = glm::lerp(glm::vec4(13 / 255.0f, 38 / 255.0f, 212 / 255.0f, 1.0f), glm::vec4(0.9f, 0.9f, 0.9f, 1.0f), m_ParticlePool[i].Position.y);
 		m_ParticlePool[i].Forces = { 0.0f, 0.0f };
 	}
