@@ -1,3 +1,5 @@
+## 2D Fluid/Cloud Particle Simulation
+
 ### Code Acknowledgments
 Template [OpenGL source code](https://github.com/TheCherno/OneHourParticleSystem/tree/master) was taken from TheCherno and used as a basis for this project to handle low-level OpenGL calls and window handling. The previously existing particle system implementation was mostly modified/removed for allow
 the fluid/cloud particle simulation to be built on top of it.
