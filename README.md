@@ -9,9 +9,11 @@ My fluid/cloud simulation implementation can be found in ParticleSystem.cpp/.h, 
 ### Instructions
 This code was developed on a Windows 11 64-bit system using Visual Studio, but it should run just fine in Windows 10. 
 
-1. To run, clone the repo.
-2. Open the folder and open "Simulation.sln" in Visual Studio.
-3. Build the project and run it.
+1. First, clone the repo.
+2. Open the cloned folder and open "Simulation.sln" in Visual Studio.
+3. In the Solution Explorer, right-click on the "OpenGL-Core" Project and press "Build".
+4. Once built, right-click on the "Simulation" Project and select "Set as Startup Project".
+5. Press the Green Arrow for "Local Windows Debugger" at the top to run.
 
 ### References
 The following research papers were used as the source of the implementation for this simulation project, ordered from most to least used:
